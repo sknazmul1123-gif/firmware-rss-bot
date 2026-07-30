@@ -1,10 +1,26 @@
 from datetime import datetime
 import os
 import re
+import threading
 import time
 import feedparser
+from flask import Flask
 import pytz
 import requests
+
+# Render-এর ফ্রি Web Service চালুর জন্য পোর্ট সার্ভার
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+  return "Bot is running successfully!"
+
+
+def run_web_server():
+  port = int(os.environ.get("PORT", 8000))
+  app.run(host="0.0.0.0", port=port)
+
 
 # ==========================================
 # CONFIGURATION & CONSTANTS
@@ -151,6 +167,9 @@ def check_rss():
 # MAIN EXECUTION
 # ==========================================
 if __name__ == "__main__":
+  # ব্যাকগ্রাউন্ডে পোর্টের জন্য Flask Web Server থ্রেড চালু
+  threading.Thread(target=run_web_server, daemon=True).start()
+
   print("RSS Auto-Poster Bot Started...")
   while True:
     try:
