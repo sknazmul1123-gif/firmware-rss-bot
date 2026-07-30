@@ -1,10 +1,26 @@
 from datetime import datetime, timedelta
 import os
 import re
+import threading
 import time
 import feedparser
+from flask import Flask
 import pytz
 import requests
+
+# Render Web Service-এর পোর্ট রিকোয়ারমেন্ট মেটানোর জন্য ছোট Flask Server
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+  return "Bot is active!"
+
+
+def run_web_server():
+  port = int(os.environ.get("PORT", 10000))
+  app.run(host="0.0.0.0", port=port)
+
 
 # ==========================================
 # CONFIGURATION & CONSTANTS
@@ -176,6 +192,9 @@ def check_rss():
 # MAIN EXECUTION
 # ==========================================
 if __name__ == "__main__":
+  # ব্যাকগ্রাউন্ডে পোর্টের জন্য Web Server রান থাকবে
+  threading.Thread(target=run_web_server, daemon=True).start()
+
   print("RSS Auto-Poster Bot Started...")
   while True:
     try:
