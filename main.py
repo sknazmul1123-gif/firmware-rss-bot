@@ -25,17 +25,18 @@ def run_web_server():
 # ==========================================
 # 2. CONFIGURATION & CONSTANTS
 # ==========================================
-# Environment Variables (Render-এর নাম অনুযায়ী সেট করা)
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 TELEGRAM_BOT_TOKEN = os.environ.get("BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("CHANNEL_ID")
 RSS_FEED_URL = os.environ.get("RSS_URL", "https://firmwareworld.com/rss.xml")
 
-# Repository Details
 REPO_NAME = "sknazmul1123-gif/firmware-rss-bot"
 FILE_PATH = "posted_urls.txt"
 
 CHECK_INTERVAL = 300 # প্রতি ৫ মিনিট পর পর চেক করবে
+
+# সাউন্ড ট্র্যাকিং ভ্যারিয়েবল (বাংলাদেশে টাইমজোনে প্রতিদিন ১ বার সাউন্ডের জন্য)
+last_sound_date = None
 
 # ==========================================
 # 3. GITHUB DATABASE FUNCTIONS
@@ -82,21 +83,41 @@ def save_posted_url(new_url):
         print(f"⚠️ GitHub-এ লিংক সেভ করার সময় ভুল হয়েছে: {e}")
 
 # ==========================================
-# 4. TELEGRAM NOTIFICATION FUNCTION
+# 4. TELEGRAM NOTIFICATION FUNCTION (DAILY 1 SOUND LIMIT)
 # ==========================================
 def send_telegram_message(title, link):
-    """টেলিগ্রাম চ্যানেলে মেসেজ পাঠাবে"""
+    global last_sound_date
+    
+    # বাংলাদেশ টাইমজোনে আজকের তারিখ বের করা
+    bd_tz = pytz.timezone('Asia/Dhaka')
+    today_date = datetime.now(bd_tz).strftime('%Y-%m-%d')
+    
+    # আজকের দিনে কি আগে কোনো মেসেজে সাউন্ড হয়েছে?
+    if last_sound_date != today_date:
+        disable_sound = False  # আজকের ১ম পোস্ট -> সাউন্ড বাজবে 🔔
+        print("🔔 আজকের দিনের প্রথম পোস্ট! নোটিফিকেশন সাউন্ড অন থাকবে।")
+    else:
+        disable_sound = True   # আজকের ২য়+ পোস্ট -> সাইলেন্ট থাকবে 🔕
+        print("🔕 আজকের দিনের পরবর্তী পোস্ট, সাইলেন্টলি পাঠানো হচ্ছে।")
+    
     message = f"📌 **New Firmware Released!**\n\n📁 **{title}**\n\n🔗 [Download Link]({link})"
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
         "parse_mode": "Markdown",
-        "disable_web_page_preview": False
+        "disable_web_page_preview": False,
+        "disable_notification": disable_sound  # True হলে সম্পূর্ণ সাইলেন্ট
     }
+    
     try:
         response = requests.post(url, data=payload)
-        return response.status_code == 200
+        if response.status_code == 200:
+            # সফলভাবে মেসেজ গেলে আজকের তারিখটি সেভ করে রাখা
+            last_sound_date = today_date
+            return True
+        return False
     except Exception as e:
         print(f"⚠️ Telegram Send Error: {e}")
         return False
@@ -107,28 +128,24 @@ def send_telegram_message(title, link):
 def run_rss_bot():
     print("🚀 RSS Bot চালু হচ্ছে...")
     
-    # শুরুতেই গিটহাব থেকে সেভ করা লিংকগুলো মেমোরিতে লোড করে নেওয়া
     posted_urls = load_posted_urls()
 
     while True:
         try:
             feed = feedparser.parse(RSS_FEED_URL)
-            for entry in reversed(feed.entries): # পুরনো থেকে নতুন অর্ডারে পোস্ট করবে
+            for entry in reversed(feed.entries): # পুরনো থেকে নতুন অর্ডারে
                 post_url = entry.link.strip()
                 post_title = entry.title
                 
-                # যদি লিংকটি গিটহাব ডাটাবেজে না থাকে
                 if post_url not in posted_urls:
                     print(f"🆕 নতুন পোস্ট পাওয়া গেছে: {post_title}")
                     
-                    # টেলিগ্রামে পোস্ট পাঠানো
                     success = send_telegram_message(post_title, post_url)
                     
                     if success:
                         posted_urls.add(post_url)
-                        # গিটহাব ডাটাবেজে ফাইল পুশ করা
                         save_posted_url(post_url)
-                        time.sleep(3) # রিকোয়েস্ট স্প্যাম এড়াতে ৩ সেকেন্ড পজ
+                        time.sleep(3) # ৩ সেকেন্ড বিরতি
                         
         except Exception as e:
             print(f"⚠️ RSS Loop Error: {e}")
@@ -139,10 +156,8 @@ def run_rss_bot():
 # 6. START THREADS
 # ==========================================
 if __name__ == "__main__":
-    # ব্যাকগ্রাউন্ডে RSS Bot রান করানো
     bot_thread = threading.Thread(target=run_rss_bot)
     bot_thread.daemon = True
     bot_thread.start()
     
-    # রেন্ডার সার্ভারের জন্য ওয়েবসাইট স্পিন আপ
     run_web_server()
