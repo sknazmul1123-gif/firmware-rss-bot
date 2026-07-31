@@ -33,7 +33,7 @@ RSS_FEED_URL = os.environ.get("RSS_URL", "https://firmwareworld.com/rss.xml")
 REPO_NAME = "sknazmul1123-gif/firmware-rss-bot"
 FILE_PATH = "posted_urls.txt"
 
-CHECK_INTERVAL = 600      # প্রতি ১০ মিনিট পর পর RSS চেক করবে
+CHECK_INTERVAL = 1800     # প্রতি ৩০ মিনিট (আধা ঘণ্টা) পর পর RSS চেক করবে
 BATCH_SIZE = 20           # এক পোস্টে সর্বোচ্চ ২০টি ফাইলের লিস্ট করবে
 SOUND_INTERVAL = 7200     # ২ ঘণ্টা (৭২০০ সেকেন্ড) সাউন্ড গ্যাপিং
 
