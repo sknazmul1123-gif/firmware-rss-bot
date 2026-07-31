@@ -25,15 +25,15 @@ def run_web_server():
 # ==========================================
 # 2. CONFIGURATION & CONSTANTS
 # ==========================================
-# Environment Variables (Set inside Render)
+# Environment Variables (Render-এর নাম অনুযায়ী সেট করা)
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+TELEGRAM_BOT_TOKEN = os.environ.get("BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("CHANNEL_ID")
+RSS_FEED_URL = os.environ.get("RSS_URL", "https://firmwareworld.com/rss.xml")
 
 # Repository Details
 REPO_NAME = "sknazmul1123-gif/firmware-rss-bot"
 FILE_PATH = "posted_urls.txt"
-RSS_FEED_URL = "https://firmwareworld.com/rss.xml" # আপনার সাইটের RSS Feed Link
 
 CHECK_INTERVAL = 300 # প্রতি ৫ মিনিট পর পর চেক করবে
 
@@ -107,7 +107,7 @@ def send_telegram_message(title, link):
 def run_rss_bot():
     print("🚀 RSS Bot চালু হচ্ছে...")
     
-    # শুরতেই গিটহাব থেকে সেভ করা লিংকগুলো মেমোরিতে লোড করে নেওয়া
+    # শুরুতেই গিটহাব থেকে সেভ করা লিংকগুলো মেমোরিতে লোড করে নেওয়া
     posted_urls = load_posted_urls()
 
     while True:
