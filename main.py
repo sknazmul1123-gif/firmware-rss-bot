@@ -1,5 +1,5 @@
 import os
-import re
+import html
 import time
 import threading
 from datetime import datetime
@@ -58,6 +58,7 @@ def load_posted_urls():
 
 def save_posted_urls_batch(new_urls):
     if not GITHUB_TOKEN or not new_urls:
+        print("❌ GITHUB_TOKEN নেই অথবা নতুন কোনো URL সেভ করার জন্য পাওয়া যায়নি!")
         return
     try:
         g = Github(GITHUB_TOKEN)
@@ -78,21 +79,20 @@ def save_posted_urls_batch(new_urls):
             content=updated_content,
             sha=contents.sha
         )
-        print(f"✅ GitHub-এ একসাথে {len(new_urls)} টি নতুন লিংক সেভ হয়েছে।")
+        print(f"✅ GitHub-এ একসাথে {len(new_urls)} টি নতুন লিংক সফলভাবে সেভ হয়েছে!")
     except Exception as e:
-        print(f"⚠️ GitHub-এ লিংক সেভ করার সময় ভুল হয়েছে: {e}")
+        print(f"❌ GitHub-এ লিংক সেভ করতে ব্যর্থ! কারণ: {e}")
 
 # ==========================================
-# 4. TELEGRAM BATCH NOTIFICATION FUNCTION
+# 4. TELEGRAM BATCH NOTIFICATION FUNCTION (HTML PARSE MODE)
 # ==========================================
 def send_telegram_batch(items):
-    """কাস্টম লেআউটে ২০টি ফাইল একসাথে একটা মেসেজে পাঠাবে"""
     global last_sound_date
     
     bd_tz = pytz.timezone('Asia/Dhaka')
     now_bd = datetime.now(bd_tz)
     today_date = now_bd.strftime('%Y-%m-%d')
-    formatted_date = now_bd.strftime('%d-%m-%Y') # DD-MM-YYYY
+    formatted_date = now_bd.strftime('%d-%m-%Y')
     
     # দিনে ১ বার সাউন্ড কন্ট্রোল
     if last_sound_date != today_date:
@@ -102,17 +102,21 @@ def send_telegram_batch(items):
         disable_sound = True
         print("🔕 আজকের ২য়+ ব্যাচ পোস্ট -> সাইলেন্ট পাঠানো হচ্ছে।")
 
-    # আপনার কাস্টম হেডার লেআউট
+    # কাস্টম হেডার লেআউট (HTML Format)
     message_lines = [
-        f"📌 **NEW FILES ADDED** 📅 **{formatted_date}**",
-        f"🌐 **Website:** [Firmware World](https://firmwareworld.com)\n"
+        f"📌 <b>NEW FILES ADDED</b> 📅 <b>{formatted_date}</b>",
+        f"🌐 <b>Website:</b> <a href=\"https://firmwareworld.com\">Firmware World</a>\n"
     ]
     
-    # সিরিয়াল নম্বর ছাড়া প্রতিটি ফাইলের উপরে "NEW FILE" লেখা লেআউট
+    # ২০টি ফাইল লিস্টের লেআউট (আগুন ইমোজি + এইচটিএমএল লিংক)
     for item in items:
-        message_lines.append("**NEW FILE**")
-        message_lines.append(f"📁 **{item['title']}**")
-        message_lines.append(f"🔗 Link: [Download]({item['link']})\n")
+        # টাইটেলের স্পেশাল ক্যারেক্টার সেফ করার জন্য html.escape
+        clean_title = html.escape(item['title'])
+        clean_link = item['link'].strip()
+        
+        message_lines.append("🔥 NEW FILE 🔥")
+        message_lines.append(f"📁 <b>{clean_title}</b>")
+        message_lines.append(f"🔗 Link: <a href=\"{clean_link}\">Download</a>\n")
     
     final_message = "\n".join(message_lines)
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -120,7 +124,7 @@ def send_telegram_batch(items):
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": final_message,
-        "parse_mode": "Markdown",
+        "parse_mode": "HTML", # মার্কডাউন বাদ দিয়ে এইচটিএমএল করা হলো
         "disable_web_page_preview": True,
         "disable_notification": disable_sound
     }
@@ -149,7 +153,7 @@ def run_rss_bot():
             feed = feedparser.parse(RSS_FEED_URL)
             unposted_items = []
             
-            # ফিড থেকে নতুন ফাইলগুলো আলাদা করা
+            # ফিড থেকে নতুন ফাইলগুলো আলাদা করা (পুরনো থেকে নতুন অর্ডারে)
             for entry in reversed(feed.entries):
                 post_url = entry.link.strip()
                 post_title = entry.title
@@ -160,7 +164,6 @@ def run_rss_bot():
                         "link": post_url
                     })
 
-            # যদি নতুন কোনো ফাইল জমা থাকে
             if unposted_items:
                 print(f"📦 মোট নতুন ফাইল পাওয়া গেছে: {len(unposted_items)} টি")
                 
@@ -176,7 +179,7 @@ def run_rss_bot():
                         
                         # গিটহাবে ২০টি লিংক সেভ করা
                         save_posted_urls_batch(batch_urls)
-                        time.sleep(3) # ৩ সেকেন্ড বিরতি
+                        time.sleep(3)
                         
         except Exception as e:
             print(f"⚠️ RSS Loop Error: {e}")
