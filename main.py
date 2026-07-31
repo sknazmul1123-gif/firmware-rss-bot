@@ -19,6 +19,7 @@ def home():
     return "Bot is active!"
 
 def run_web_server():
+    # Render অটোমেটিক PORT এনভায়রনমেন্ট ভ্যারিয়েবল প্রদান করে
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
@@ -231,7 +232,7 @@ def run_rss_bot():
         time.sleep(CHECK_INTERVAL)
 
 # ==========================================
-# 7. START THREADS
+# 7. START THREADS & WEB SERVER
 # ==========================================
 if __name__ == "__main__":
     bot_thread = threading.Thread(target=run_rss_bot)
