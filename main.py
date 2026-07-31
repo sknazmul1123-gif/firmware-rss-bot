@@ -33,13 +33,34 @@ RSS_FEED_URL = os.environ.get("RSS_URL", "https://firmwareworld.com/rss.xml")
 REPO_NAME = "sknazmul1123-gif/firmware-rss-bot"
 FILE_PATH = "posted_urls.txt"
 
-CHECK_INTERVAL = 300 # প্রতি ৫ মিনিট পর পর RSS চেক করবে
-BATCH_SIZE = 20      # এক পোস্টে সর্বোচ্চ ২০টি ফাইলের লিস্ট করবে
+CHECK_INTERVAL = 600      # প্রতি ১০ মিনিট পর পর RSS চেক করবে
+BATCH_SIZE = 20           # এক পোস্টে সর্বোচ্চ ২০টি ফাইলের লিস্ট করবে
+SOUND_INTERVAL = 7200     # ২ ঘণ্টা (৭২০০ সেকেন্ড) সাউন্ড গ্যাপিং
 
-last_sound_date = None
+last_sound_time = 0       # সর্বশেষ কখন সাউন্ড দেওয়া হয়েছিল তা ধরে রাখবে
+
+# জনপ্রিয় মোবাইল ব্র্যান্ডের লিস্ট (স্বয়ংক্রিয় ফিল্টারিংয়ের জন্য)
+BRANDS = [
+    "SAMSUNG", "XIAOMI", "REDMI", "POCO", "REALME", "OPPO", "VIVO", 
+    "TECNO", "INFINIX", "ITEL", "ONEPLUS", "NOTHING", "HONOR", "HUAWEI",
+    "NOKIA", "MOTOROLA", "LAVA", "SYMPHONY", "WALTON", "ASUS", "GOOGLE"
+]
 
 # ==========================================
-# 3. GITHUB DATABASE FUNCTIONS
+# 3. HELPER FUNCTION: BRAND DETECTION
+# ==========================================
+def detect_brand(title):
+    """ফাইলের টাইটেল থেকে মোবাইল ব্র্যান্ড শনাক্ত করবে"""
+    title_upper = title.upper()
+    for brand in BRANDS:
+        if brand in title_upper:
+            if brand in ["REDMI", "POCO"]:
+                return "XIAOMI / REDMI / POCO"
+            return brand
+    return "OTHER FIRMWARE"
+
+# ==========================================
+# 4. GITHUB DATABASE FUNCTIONS
 # ==========================================
 def load_posted_urls():
     if not GITHUB_TOKEN:
@@ -84,39 +105,58 @@ def save_posted_urls_batch(new_urls):
         print(f"❌ GitHub-এ লিংক সেভ করতে ব্যর্থ! কারণ: {e}")
 
 # ==========================================
-# 4. TELEGRAM BATCH NOTIFICATION FUNCTION (HTML PARSE MODE)
+# 5. TELEGRAM BATCH NOTIFICATION (BRAND GROUPED + 2 HOUR SOUND LOGIC)
 # ==========================================
 def send_telegram_batch(items):
-    global last_sound_date
+    global last_sound_time
     
     bd_tz = pytz.timezone('Asia/Dhaka')
     now_bd = datetime.now(bd_tz)
-    today_date = now_bd.strftime('%Y-%m-%d')
     formatted_date = now_bd.strftime('%d-%m-%Y')
+    formatted_time = now_bd.strftime('%I:%M %p')
     
-    # দিনে ১ বার সাউন্ড কন্ট্রোল
-    if last_sound_date != today_date:
+    current_timestamp = time.time()
+    
+    # ২ ঘণ্টা সাউন্ড কন্ট্রোল লজিক
+    if (current_timestamp - last_sound_time) >= SOUND_INTERVAL:
         disable_sound = False
-        print("🔔 আজকের ১ম ব্যাচ পোস্ট -> নোটিফিকেশন সাউন্ড অন!")
+        print("🔔 ২ ঘণ্টার পর পোস্ট বা ১ম পোস্ট -> নোটিফিকেশন সাউন্ড অন!")
     else:
         disable_sound = True
-        print("🔕 আজকের ২য়+ ব্যাচ পোস্ট -> সাইলেন্ট পাঠানো হচ্ছে।")
+        remaining_time = int((SOUND_INTERVAL - (current_timestamp - last_sound_time)) / 60)
+        print(f"🔕 ২ ঘণ্টার বেশি হয়নি (বাকি {remaining_time} মিনিট) -> সাইলেন্ট পাঠানো হচ্ছে।")
 
-    # কাস্টম হেডার লেআউট (HTML Format)
+    # ফাইলগুলোকে ব্র্যান্ড অনুসারে ডিকশনারিতে ভাগ করা
+    grouped_items = {}
+    for item in items:
+        brand = detect_brand(item['title'])
+        if brand not in grouped_items:
+            grouped_items[brand] = []
+        grouped_items[brand].append(item)
+
+    # কাস্টম হেডার লেআউট
     message_lines = [
-        f"📌 <b>NEW FILES ADDED</b> 📅 <b>{formatted_date}</b>",
+        f"📌 <b>NEW FILES ADDED</b>",
+        f"📅 <b>Date:</b> {formatted_date} | ⏰ <b>Time:</b> {formatted_time}",
         f"🌐 <b>Website:</b> <a href=\"https://firmwareworld.com\">Firmware World</a>\n"
     ]
     
-    # ২০টি ফাইল লিস্টের লেআউট (আগুন ইমোজি + এইচটিএমএল লিংক)
-    for item in items:
-        # টাইটেলের স্পেশাল ক্যারেক্টার সেফ করার জন্য html.escape
-        clean_title = html.escape(item['title'])
-        clean_link = item['link'].strip()
-        
-        message_lines.append("🔥 NEW FILE 🔥")
-        message_lines.append(f"📁 <b>{clean_title}</b>")
-        message_lines.append(f"🔗 Link: <a href=\"{clean_link}\">Download</a>\n")
+    # ব্র্যান্ড অনুসারে লিস্ট তৈরি করা
+    for brand, brand_items in grouped_items.items():
+        message_lines.append(f"🔹 <b>{brand} FIRMWARE</b>")
+        for item in brand_items:
+            clean_title = html.escape(item['title'])
+            clean_link = item['link'].strip()
+            
+            quote_block = (
+                f"<blockquote>"
+                f"🔥 NEW FILE 🔥\n\n"
+                f"➡️ <b>{clean_title}</b>\n\n"
+                f"🔗 Link: <a href=\"{clean_link}\">Download</a>"
+                f"</blockquote>"
+            )
+            message_lines.append(quote_block)
+        message_lines.append("") # ব্র্যান্ডগুলোর মাঝে স্পেস
     
     final_message = "\n".join(message_lines)
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -124,7 +164,7 @@ def send_telegram_batch(items):
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": final_message,
-        "parse_mode": "HTML", # মার্কডাউন বাদ দিয়ে এইচটিএমএল করা হলো
+        "parse_mode": "HTML",
         "disable_web_page_preview": True,
         "disable_notification": disable_sound
     }
@@ -132,7 +172,9 @@ def send_telegram_batch(items):
     try:
         response = requests.post(url, data=payload)
         if response.status_code == 200:
-            last_sound_date = today_date
+            # পোস্ট সফল হলে এবং সাউন্ডে পাঠানো হলে সময় কাউন্ট আপডেট করা
+            if not disable_sound:
+                last_sound_time = current_timestamp
             return True
         else:
             print(f"⚠️ Telegram API Error: {response.text}")
@@ -142,7 +184,7 @@ def send_telegram_batch(items):
         return False
 
 # ==========================================
-# 5. MAIN RSS BOT LOOP (BATCHING LOGIC)
+# 6. MAIN RSS BOT LOOP (BATCHING LOGIC)
 # ==========================================
 def run_rss_bot():
     print("🚀 RSS Bot চালু হচ্ছে...")
@@ -153,7 +195,7 @@ def run_rss_bot():
             feed = feedparser.parse(RSS_FEED_URL)
             unposted_items = []
             
-            # ফিড থেকে নতুন ফাইলগুলো আলাদা করা (পুরনো থেকে নতুন অর্ডারে)
+            # ফিড থেকে নতুন ফাইল আলাদা করা (পুরনো থেকে নতুন ক্রমানুসারে)
             for entry in reversed(feed.entries):
                 post_url = entry.link.strip()
                 post_title = entry.title
@@ -167,7 +209,7 @@ def run_rss_bot():
             if unposted_items:
                 print(f"📦 মোট নতুন ফাইল পাওয়া গেছে: {len(unposted_items)} টি")
                 
-                # ২০টা ২০টা করে ব্যাচ ভাগ করে পাঠানো
+                # ২০টি ২০টি করে ব্যাচ ভাগ করে পাঠানো
                 for i in range(0, len(unposted_items), BATCH_SIZE):
                     batch = unposted_items[i:i + BATCH_SIZE]
                     
@@ -177,7 +219,7 @@ def run_rss_bot():
                         for url in batch_urls:
                             posted_urls.add(url)
                         
-                        # গিটহাবে ২০টি লিংক সেভ করা
+                        # গিটহাবে সেভ করা
                         save_posted_urls_batch(batch_urls)
                         time.sleep(3)
                         
@@ -187,7 +229,7 @@ def run_rss_bot():
         time.sleep(CHECK_INTERVAL)
 
 # ==========================================
-# 6. START THREADS
+# 7. START THREADS
 # ==========================================
 if __name__ == "__main__":
     bot_thread = threading.Thread(target=run_rss_bot)
