@@ -105,7 +105,7 @@ def save_posted_urls_batch(new_urls):
         print(f"❌ GitHub-এ লিংক সেভ করতে ব্যর্থ! কারণ: {e}")
 
 # ==========================================
-# 5. TELEGRAM BATCH NOTIFICATION (BRAND GROUPED + 2 HOUR SOUND LOGIC)
+# 5. TELEGRAM BATCH NOTIFICATION (SINGLE QUOTE BLOCK)
 # ==========================================
 def send_telegram_batch(items):
     global last_sound_time
@@ -134,31 +134,34 @@ def send_telegram_batch(items):
             grouped_items[brand] = []
         grouped_items[brand].append(item)
 
-    # কাস্টম হেডার লেআউট
+    # কাস্টম হেডার (Quote বক্সের বাইরে থাকবে)
     message_lines = [
         f"📌 <b>NEW FILES ADDED</b>",
         f"📅 <b>Date:</b> {formatted_date} | ⏰ <b>Time:</b> {formatted_time}",
         f"🌐 <b>Website:</b> <a href=\"https://firmwareworld.com\">Firmware World</a>\n"
     ]
     
-    # ব্র্যান্ড অনুসারে লিস্ট তৈরি করা
+    # পুরো ফাইলের লিস্টকে একটা সিঙ্গেল Quote ব্লকের ভেতরে ঢুকানো
+    quote_lines = ["<blockquote>"]
+    
     for brand, brand_items in grouped_items.items():
-        message_lines.append(f"🔹 <b>{brand} FIRMWARE</b>")
+        quote_lines.append(f"🔹 <b>{brand} FIRMWARE</b>\n")
         for item in brand_items:
             clean_title = html.escape(item['title'])
             clean_link = item['link'].strip()
             
-            quote_block = (
-                f"<blockquote>"
-                f"🔥 NEW FILE 🔥\n\n"
-                f"➡️ <b>{clean_title}</b>\n\n"
-                f"🔗 Link: <a href=\"{clean_link}\">Download</a>"
-                f"</blockquote>"
+            file_entry = (
+                f"🔥 NEW FILE 🔥\n"
+                f"➡️ <b>{clean_title}</b>\n"
+                f"🔗 Link: <a href=\"{clean_link}\">Download</a>\n"
             )
-            message_lines.append(quote_block)
-        message_lines.append("") # ব্র্যান্ডগুলোর মাঝে স্পেস
+            quote_lines.append(file_entry)
+        quote_lines.append("") # ব্র্যান্ডগুলোর মাঝে গ্যাপ
+        
+    quote_lines.append("</blockquote>")
     
-    final_message = "\n".join(message_lines)
+    # হেডার এবং একক Quote ব্লক একসাথে যোগ করা
+    final_message = "\n".join(message_lines) + "\n".join(quote_lines)
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     
     payload = {
@@ -172,7 +175,6 @@ def send_telegram_batch(items):
     try:
         response = requests.post(url, data=payload)
         if response.status_code == 200:
-            # পোস্ট সফল হলে এবং সাউন্ডে পাঠানো হলে সময় কাউন্ট আপডেট করা
             if not disable_sound:
                 last_sound_time = current_timestamp
             return True
