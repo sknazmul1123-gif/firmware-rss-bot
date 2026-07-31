@@ -33,16 +33,15 @@ RSS_FEED_URL = os.environ.get("RSS_URL", "https://firmwareworld.com/rss.xml")
 REPO_NAME = "sknazmul1123-gif/firmware-rss-bot"
 FILE_PATH = "posted_urls.txt"
 
-CHECK_INTERVAL = 300 # প্রতি ৫ মিনিট পর পর চেক করবে
+CHECK_INTERVAL = 300 # প্রতি ৫ মিনিট পর পর RSS চেক করবে
+BATCH_SIZE = 20      # এক পোস্টে সর্বোচ্চ ২০টি ফাইলের লিস্ট করবে
 
-# সাউন্ড ট্র্যাকিং ভ্যারিয়েবল (বাংলাদেশে টাইমজোনে প্রতিদিন ১ বার সাউন্ডের জন্য)
 last_sound_date = None
 
 # ==========================================
 # 3. GITHUB DATABASE FUNCTIONS
 # ==========================================
 def load_posted_urls():
-    """GitHub এর posted_urls.txt থেকে সেভ করা লিংক নিয়ে আসবে"""
     if not GITHUB_TOKEN:
         print("❌ GITHUB_TOKEN পাওয়া যায়নি!")
         return set()
@@ -57,9 +56,8 @@ def load_posted_urls():
         print(f"⚠️ GitHub ফাইল পড়ার সময় ভুল হয়েছে: {e}")
         return set()
 
-def save_posted_url(new_url):
-    """নতুন পোস্টের লিংক GitHub এর posted_urls.txt ফাইলে Push করবে"""
-    if not GITHUB_TOKEN:
+def save_posted_urls_batch(new_urls):
+    if not GITHUB_TOKEN or not new_urls:
         return
     try:
         g = Github(GITHUB_TOKEN)
@@ -67,84 +65,117 @@ def save_posted_url(new_url):
         contents = repo.get_contents(FILE_PATH)
         
         existing_content = contents.decoded_content.decode('utf-8')
+        urls_to_add = "\n".join(new_urls)
+        
         if existing_content and not existing_content.endswith('\n'):
-            updated_content = existing_content + f"\n{new_url}"
+            updated_content = existing_content + f"\n{urls_to_add}"
         else:
-            updated_content = existing_content + f"{new_url}"
+            updated_content = existing_content + f"{urls_to_add}"
 
         repo.update_file(
             path=FILE_PATH,
-            message="Bot: Add new posted URL",
+            message=f"Bot: Add {len(new_urls)} new posted URLs",
             content=updated_content,
             sha=contents.sha
         )
-        print(f"✅ GitHub-এ নতুন লিংক সফলভাবে সেভ হয়েছে: {new_url}")
+        print(f"✅ GitHub-এ একসাথে {len(new_urls)} টি নতুন লিংক সেভ হয়েছে।")
     except Exception as e:
         print(f"⚠️ GitHub-এ লিংক সেভ করার সময় ভুল হয়েছে: {e}")
 
 # ==========================================
-# 4. TELEGRAM NOTIFICATION FUNCTION (DAILY 1 SOUND LIMIT)
+# 4. TELEGRAM BATCH NOTIFICATION FUNCTION
 # ==========================================
-def send_telegram_message(title, link):
+def send_telegram_batch(items):
+    """কাস্টম লেআউটে ২০টি ফাইল একসাথে একটা মেসেজে পাঠাবে"""
     global last_sound_date
     
-    # বাংলাদেশ টাইমজোনে আজকের তারিখ বের করা
     bd_tz = pytz.timezone('Asia/Dhaka')
-    today_date = datetime.now(bd_tz).strftime('%Y-%m-%d')
+    now_bd = datetime.now(bd_tz)
+    today_date = now_bd.strftime('%Y-%m-%d')
+    formatted_date = now_bd.strftime('%d-%m-%Y') # DD-MM-YYYY
     
-    # আজকের দিনে কি আগে কোনো মেসেজে সাউন্ড হয়েছে?
+    # দিনে ১ বার সাউন্ড কন্ট্রোল
     if last_sound_date != today_date:
-        disable_sound = False  # আজকের ১ম পোস্ট -> সাউন্ড বাজবে 🔔
-        print("🔔 আজকের দিনের প্রথম পোস্ট! নোটিফিকেশন সাউন্ড অন থাকবে।")
+        disable_sound = False
+        print("🔔 আজকের ১ম ব্যাচ পোস্ট -> নোটিফিকেশন সাউন্ড অন!")
     else:
-        disable_sound = True   # আজকের ২য়+ পোস্ট -> সাইলেন্ট থাকবে 🔕
-        print("🔕 আজকের দিনের পরবর্তী পোস্ট, সাইলেন্টলি পাঠানো হচ্ছে।")
+        disable_sound = True
+        print("🔕 আজকের ২য়+ ব্যাচ পোস্ট -> সাইলেন্ট পাঠানো হচ্ছে।")
+
+    # আপনার কাস্টম হেডার লেআউট
+    message_lines = [
+        f"📌 **NEW FILES ADDED** 📅 **{formatted_date}**",
+        f"🌐 **Website:** [Firmware World](https://firmwareworld.com)\n"
+    ]
     
-    message = f"📌 **New Firmware Released!**\n\n📁 **{title}**\n\n🔗 [Download Link]({link})"
+    # সিরিয়াল নম্বর ছাড়া প্রতিটি ফাইলের উপরে "NEW FILE" লেখা লেআউট
+    for item in items:
+        message_lines.append("**NEW FILE**")
+        message_lines.append(f"📁 **{item['title']}**")
+        message_lines.append(f"🔗 Link: [Download]({item['link']})\n")
+    
+    final_message = "\n".join(message_lines)
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
+        "text": final_message,
         "parse_mode": "Markdown",
-        "disable_web_page_preview": False,
-        "disable_notification": disable_sound  # True হলে সম্পূর্ণ সাইলেন্ট
+        "disable_web_page_preview": True,
+        "disable_notification": disable_sound
     }
     
     try:
         response = requests.post(url, data=payload)
         if response.status_code == 200:
-            # সফলভাবে মেসেজ গেলে আজকের তারিখটি সেভ করে রাখা
             last_sound_date = today_date
             return True
-        return False
+        else:
+            print(f"⚠️ Telegram API Error: {response.text}")
+            return False
     except Exception as e:
         print(f"⚠️ Telegram Send Error: {e}")
         return False
 
 # ==========================================
-# 5. MAIN RSS BOT LOOP
+# 5. MAIN RSS BOT LOOP (BATCHING LOGIC)
 # ==========================================
 def run_rss_bot():
     print("🚀 RSS Bot চালু হচ্ছে...")
-    
     posted_urls = load_posted_urls()
 
     while True:
         try:
             feed = feedparser.parse(RSS_FEED_URL)
-            for entry in reversed(feed.entries): # পুরনো থেকে নতুন অর্ডারে
+            unposted_items = []
+            
+            # ফিড থেকে নতুন ফাইলগুলো আলাদা করা
+            for entry in reversed(feed.entries):
                 post_url = entry.link.strip()
                 post_title = entry.title
                 
                 if post_url not in posted_urls:
-                    print(f"🆕 নতুন পোস্ট পাওয়া গেছে: {post_title}")
+                    unposted_items.append({
+                        "title": post_title,
+                        "link": post_url
+                    })
+
+            # যদি নতুন কোনো ফাইল জমা থাকে
+            if unposted_items:
+                print(f"📦 মোট নতুন ফাইল পাওয়া গেছে: {len(unposted_items)} টি")
+                
+                # ২০টা ২০টা করে ব্যাচ ভাগ করে পাঠানো
+                for i in range(0, len(unposted_items), BATCH_SIZE):
+                    batch = unposted_items[i:i + BATCH_SIZE]
                     
-                    success = send_telegram_message(post_title, post_url)
-                    
+                    success = send_telegram_batch(batch)
                     if success:
-                        posted_urls.add(post_url)
-                        save_posted_url(post_url)
+                        batch_urls = [item['link'] for item in batch]
+                        for url in batch_urls:
+                            posted_urls.add(url)
+                        
+                        # গিটহাবে ২০টি লিংক সেভ করা
+                        save_posted_urls_batch(batch_urls)
                         time.sleep(3) # ৩ সেকেন্ড বিরতি
                         
         except Exception as e:
