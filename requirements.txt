@@ -1,5 +1,6 @@
-feedparser
+Flask
 requests
+feedparser
 pytz
-flask
 PyGithub
+google-generativeai
