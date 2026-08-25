@@ -3,4 +3,4 @@ requests
 feedparser
 pytz
 PyGithub
-google-generativeai
+beautifulsoup4
