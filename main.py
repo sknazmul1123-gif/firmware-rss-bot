@@ -1,6 +1,7 @@
 import os
 import html
 import time
+import threading
 from datetime import datetime
 import feedparser
 import pytz
@@ -100,7 +101,7 @@ def save_github_urls(file_path, new_urls):
         print(f"❌ GitHub Save Error ({file_path}): {e}")
 
 # ==========================================
-# 5. TELEGRAM SYSTEM (সম্পূর্ণ সাইলেন্ট)
+# 5. TELEGRAM SYSTEM (সাইলেন্ট নোটিফিকেশন)
 # ==========================================
 def send_telegram_batch(items):
     bd_tz = pytz.timezone('Asia/Dhaka')
@@ -140,7 +141,7 @@ def send_telegram_batch(items):
         "text": final_message,
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
-        "disable_notification": True  # ১০০% সাইলেন্ট (চ্যানেল এবং লিংকড গ্রুপে কোনো সাউন্ড বাজবে না)
+        "disable_notification": True
     }
     
     try:
