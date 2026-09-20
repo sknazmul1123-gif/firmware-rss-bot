@@ -28,13 +28,15 @@ def run_web_server():
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 TELEGRAM_BOT_TOKEN = os.environ.get("BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("CHANNEL_ID")
-RSS_FEED_URL = os.environ.get("RSS_URL", "https://firmwareworld.com/rss.xml")
+
+# আপনার নির্দিষ্ট আরএসএস ফিড লিঙ্ক
+RSS_FEED_URL = os.environ.get("RSS_URL", "https://firmwareworld.com/index.php?a=rss")
 
 REPO_NAME = "sknazmul1123-gif/firmware-rss-bot"
 TG_FILE_PATH = "posted_urls.txt"
 
 CHECK_INTERVAL = 7200     # ২ ঘণ্টা পর পর চেক
-TG_BATCH_SIZE = 20
+TG_BATCH_SIZE = 5         # টেলিগ্রামের ৪০৯৬ ক্যারেক্টার লিমিট এড়াতে ব্যাচ সাইজ ৫
 
 BRANDS = [
     "SAMSUNG", "XIAOMI", "REDMI", "POCO", "REALME", "OPPO", "VIVO", 
@@ -101,7 +103,7 @@ def save_github_urls(file_path, new_urls):
         print(f"❌ GitHub Save Error ({file_path}): {e}")
 
 # ==========================================
-# 5. TELEGRAM SYSTEM (সাইলেন্ট নোটিফিকেশন)
+# 5. TELEGRAM SYSTEM
 # ==========================================
 def send_telegram_batch(items):
     bd_tz = pytz.timezone('Asia/Dhaka')
@@ -145,10 +147,14 @@ def send_telegram_batch(items):
     }
     
     try:
-        res = requests.post(url, data=payload)
-        return res.status_code == 200
+        res = requests.post(url, data=payload, timeout=15)
+        if res.status_code == 200:
+            return True
+        else:
+            print(f"⚠️ Telegram API Rejected! Code: {res.status_code}, Response: {res.text}")
+            return False
     except Exception as e:
-        print(f"⚠️ Telegram API Error: {e}")
+        print(f"⚠️ Telegram Request Error: {e}")
         return False
 
 # ==========================================
@@ -161,10 +167,15 @@ def telegram_worker():
         try:
             tg_posted = load_github_urls(TG_FILE_PATH)
             entries = fetch_rss_entries()
-            unposted = [e for e in entries if e.link.strip() not in tg_posted]
+            
+            # লিংক ফিল্টারিং
+            unposted = [
+                e for e in entries 
+                if getattr(e, 'link', '').strip() and getattr(e, 'link', '').strip() not in tg_posted
+            ]
 
             if unposted:
-                print(f"📦 গত ২ ঘণ্টায় মোট {len(unposted)} টি নতুন ফাইল পাওয়া গেছে।")
+                print(f"📦 নতুন {len(unposted)} টি ফাইল পাওয়া গেছে।")
                 
                 for i in range(0, len(unposted), TG_BATCH_SIZE):
                     batch = unposted[i:i + TG_BATCH_SIZE]
@@ -176,8 +187,10 @@ def telegram_worker():
                             tg_posted.add(u)
                         save_github_urls(TG_FILE_PATH, batch_urls)
                         time.sleep(3)
+                    else:
+                        print("⚠️ টেলিগ্রামে মেসেজ পাঠানো যায়নি।")
             else:
-                print("🔵 গত ২ ঘণ্টায় কোনো নতুন ফাইল আপলোড হয়নি।")
+                print("🔵 কোনো নতুন ফাইল পাওয়া যায়নি।")
         except Exception as e:
             print(f"⚠️ TG Worker Exception: {e}")
             
