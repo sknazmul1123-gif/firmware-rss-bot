@@ -32,7 +32,6 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 TELEGRAM_BOT_TOKEN = os.environ.get("BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("CHANNEL_ID")
 
-# আপনার নির্দিষ্ট আরএসএস ফিড লিঙ্ক
 RSS_FEED_URL = os.environ.get(
     "RSS_URL", "https://firmwareworld.com/index.php?a=rss"
 )
@@ -40,11 +39,14 @@ RSS_FEED_URL = os.environ.get(
 REPO_NAME = "sknazmul1123-gif/firmware-rss-bot"
 TG_FILE_PATH = "posted_urls.txt"
 
-# টাইমিং সেটিংস
+# টাইমিং ও কিউ সেটিংস
 ACTIVE_START_HOUR = 9  # সকাল ৯:০০ টা থেকে সক্রিয়
-CHECK_INTERVAL = 300  # সক্রিয় সময়ে প্রতি ৫ মিনিট পর পর চেক (৩০০ সেকেন্ড)
+FETCH_INTERVAL = 300  # প্রতি ৫ মিনিট পর পর RSS চেক করে কিউতে জমা রাখবে
+FLUSH_INTERVAL = (
+    1800  # প্রতি ৩০ মিনিট পর পর কিউতে জমা হওয়া ফাইলগুলো একসাথে পোস্ট করবে
+)
 NIGHT_SLEEP_INTERVAL = 600  # রাতে স্লিপ মোডে প্রতি ১০ মিনিট পর পর ঘড়ি চেক
-TG_BATCH_SIZE = 5  # ব্যাচ সাইজ ৫
+TG_BATCH_SIZE = 5  # প্রতি মেসেজে সর্বোচ্চ ৫টি ফাইল থাকবে
 
 BRANDS = [
     "SAMSUNG",
@@ -209,62 +211,88 @@ def send_telegram_batch(items):
 
 
 # ==========================================
-# 6. WORKER LOOP (SCHEDULE ENGINE)
+# 6. WORKER LOOP (QUEUE + 30-MIN BATCH POSTING)
 # ==========================================
 def telegram_worker():
-  print("🚀 Telegram Scheduled RSS Engine চালু হয়েছে...")
+  print("🚀 Telegram Smart Queue Engine চালু হয়েছে...")
   bd_tz = pytz.timezone("Asia/Dhaka")
+
+  # ইন-মেমোরি কিউ
+  queue = []
+  queued_urls = set()
+  last_flush_time = time.time()
 
   while True:
     try:
       now_bd = datetime.now(bd_tz)
-      current_hour = now_bd.hour  # বাংলাদেশ সময় অনুযায়ী বর্তমান ঘণ্টা (০ থেকে ২৩)
+      current_hour = now_bd.hour
 
       # রাত ১২:০০ টা (0) থেকে সকাল ৯:০০ টা (8:59) পর্যন্ত স্লিপ মোড
       if current_hour < ACTIVE_START_HOUR:
         print(
             f"🌙 [স্লিপ মোড]: এখন সময় {now_bd.strftime('%I:%M %p')}। সার্ভার"
-            " ফ্রি রাখতে সকাল ৯:০০ টা পর্যন্ত আরএসএস চেক বন্ধ থাকবে।"
+            " ফ্রি রাখতে সকাল ৯:০০ টা পর্যন্ত বট স্লিপ মোডে থাকবে।"
         )
-        time.sleep(NIGHT_SLEEP_INTERVAL)  # ১০ মিনিট পর পর ঘড়ির সময় চেক করবে
+        time.sleep(NIGHT_SLEEP_INTERVAL)
         continue
 
-      # সকাল ৯:০০ টা থেকে রাত ১২:০০ টা পর্যন্ত সক্রিয় মোড
+      # ১. গিটহাব থেকে অলরেডি পোস্ট হওয়া লিংক ফেচ
       tg_posted = load_github_urls(TG_FILE_PATH)
       entries = fetch_rss_entries()
 
-      # লিংক ফিল্টারিং
-      unposted = [
-          e
-          for e in entries
-          if getattr(e, "link", "").strip()
-          and getattr(e, "link", "").strip() not in tg_posted
-      ]
+      # ২. নতুন ফাইল পেলে কিউতে জমা করা (পোস্ট করা হবে না)
+      new_added = 0
+      for e in entries:
+        link = getattr(e, "link", "").strip()
+        title = getattr(e, "title", "").strip()
+        if link and (link not in tg_posted) and (link not in queued_urls):
+          queue.append({"title": title, "link": link})
+          queued_urls.add(link)
+          new_added += 1
 
-      if unposted:
-        print(f"📦 নতুন {len(unposted)} টি ফাইল পাওয়া গেছে।")
+      if new_added > 0:
+        print(
+            f"📥 কিউতে নতুন {new_added} টি ফাইল জমা হয়েছে। (বর্তমানে কিউতে মোট:"
+            f" {len(queue)} টি ফাইল জমা আছে)"
+        )
 
-        for i in range(0, len(unposted), TG_BATCH_SIZE):
-          batch = unposted[i : i + TG_BATCH_SIZE]
-          items = [{"title": e.title, "link": e.link.strip()} for e in batch]
+      # ৩. ৩০ মিনিট পূর্ণ হলো কি না চেক করা
+      elapsed_time = time.time() - last_flush_time
 
-          if send_telegram_batch(items):
-            batch_urls = [it["link"] for it in items]
-            for u in batch_urls:
-              tg_posted.add(u)
-            save_github_urls(TG_FILE_PATH, batch_urls)
-            time.sleep(3)
-          else:
-            print("⚠️ টেলিগ্রামে মেসেজ পাঠানো যায়নি।")
-      else:
-        print("🔵 কোনো নতুন ফাইল পাওয়া যায়নি।")
+      if elapsed_time >= FLUSH_INTERVAL:
+        if queue:
+          print(
+              f"🚀 ৩০ মিনিট পূর্ণ হয়েছে! কিউতে জমে থাকা {len(queue)} টি ফাইল"
+              " একসাথে টেলিগ্রামে পোস্ট করা হচ্ছে..."
+          )
+
+          success_urls = []
+          for i in range(0, len(queue), TG_BATCH_SIZE):
+            batch = queue[i : i + TG_BATCH_SIZE]
+            if send_telegram_batch(batch):
+              batch_urls = [it["link"] for it in batch]
+              success_urls.extend(batch_urls)
+              time.sleep(3)
+            else:
+              print("⚠️ টেলিগ্রামে মেসেজ পাঠানো যায়নি।")
+
+          # পোস্ট সফল হলে গিটহাবে ডাটাবেজ আপডেট এবং কিউ ফাঁকা করা
+          if success_urls:
+            save_github_urls(TG_FILE_PATH, success_urls)
+            queue = [item for item in queue if item["link"] not in success_urls]
+            queued_urls = set(item["link"] for item in queue)
+            print("✅ কিউ সফলভাবে খালি করা হয়েছে।")
+        else:
+          print("ℹ️ ৩০ মিনিট পূর্ণ হয়েছে, তবে কোনো নতুন ফাইল জমা নেই।")
+
+        # ৩০ মিনিটের টাইমার আবার নতুন করে শুরু
+        last_flush_time = time.time()
 
     except Exception as e:
       print(f"⚠️ TG Worker Exception: {e}")
 
-    # সক্রিয় সময়ে প্রতি ৫ মিনিট পর পর চেক করবে
-    print("⏳ পরবর্তী চেকের জন্য ৫ মিনিট অপেক্ষা করা হচ্ছে...")
-    time.sleep(CHECK_INTERVAL)
+    # ৫ মিনিট পর পর আরএসএস চেক করবে
+    time.sleep(FETCH_INTERVAL)
 
 
 # ==========================================
